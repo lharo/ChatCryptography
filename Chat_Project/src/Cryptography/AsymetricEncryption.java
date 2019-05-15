@@ -41,7 +41,7 @@ public class AsymetricEncryption {
 		return keyPair;
 	}
 
-	public static byte[] encrypt(PrivateKey privateKey, String message) throws Exception {
+	public byte[] encrypt(PrivateKey privateKey, String message) throws Exception {
 		Cipher cipher = Cipher.getInstance("RSA");  
 		cipher.init(Cipher.ENCRYPT_MODE, privateKey);  
 

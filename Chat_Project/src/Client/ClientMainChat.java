@@ -2,6 +2,7 @@ package Client;
 
 import java.awt.EventQueue;
 import java.io.BufferedReader;
+import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileReader;
@@ -19,8 +20,11 @@ import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.filechooser.FileNameExtensionFilter;
 
+import com.google.gson.Gson;
+
 import Cryptography.AsymetricEncryption;
 import Cryptography.SymetricEncription;
+import Message.GsonMessage;
 import Shared.FileHandler;
 
 import javax.swing.ButtonGroup;
@@ -34,6 +38,8 @@ import javax.swing.JMenuBar;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
+import javax.swing.AbstractAction;
+import javax.swing.Action;
 
 public class ClientMainChat {
 
@@ -42,30 +48,42 @@ public class ClientMainChat {
 	private JTextArea chatField;
 	private static DataOutputStream ou;
 	private static BufferedReader in;
+	private static DataOutputStream ouPKI;
+	private static DataInputStream inPKI;	
 	private static Socket s;
+	private static Socket pkiSocket;
 	private static String message, username;
 	private static boolean end;
 	private static ClientThread cl;
-	private static Boolean isSymmetric = true;
+	private static ClientPKIThread clPKI;
+	private static Integer ecnciptionType = 1;
 	private static PublicKey pubKey = null;
 	private static PrivateKey privKey = null;	
 	private static SymetricEncription se = new SymetricEncription();
 	private static AsymetricEncryption ae = new AsymetricEncryption();
 	private static KeyPair kp;
 	private static String publicKeySymmetric;
-
+	private static Gson gson = new Gson();
+	private final Action action = new SwingAction();
+	private ClientMainChat windowClient;
+	private Boolean pkiActive = false;
+	
 	public void OpenChat(String Username) {
 		EventQueue.invokeLater(new Runnable() {
 			public void run() {
 				try {
 					username = Username;
-					ClientMainChat window = new ClientMainChat();
-					window.frame.setVisible(true);
+					windowClient = new ClientMainChat();
+					windowClient.frame.setVisible(true);
 					startThread();
-					cl=new ClientThread(s,username, window);
+					cl=new ClientThread(s,username, windowClient);
 					cl.start();
+					GsonMessage gMessage = new GsonMessage();
+					gMessage.setContentCode(1);
+					gMessage.setMessage(username);
+					System.out.println("Sending username " + gson.toJson(gMessage));
 					try {
-						ou.writeUTF(username);
+						ou.writeUTF(gson.toJson(gMessage));
 					} catch (IOException e) {}
 				} catch (Exception e) {
 					e.printStackTrace();
@@ -101,8 +119,15 @@ public class ClientMainChat {
 				message=messageField.getText();				
 				messageField.setText("");
 				try {
-					ou.writeUTF(message);
+					GsonMessage gMessage = new GsonMessage();
+					gMessage.setContentCode(1);
+					System.out.println("Message to send on Enviar" + message);
+					gMessage.setMessage(cryptMessage(message, getEcnciptionType()));
+					gMessage.setType(getEcnciptionType());
+					ou.writeUTF(gson.toJson(gMessage));//message);
 				} catch (IOException e1) {
+					e1.printStackTrace();
+				} catch (Exception e1) {
 					e1.printStackTrace();
 				}
 			}
@@ -119,7 +144,7 @@ public class ClientMainChat {
 		rdbtnSymmetric.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent e) {
 				System.out.println("Not Ass");
-				setIsSymmetric(true);
+				setEcnciptionType(1);
 			}
 		});
 		rdbtnSymmetric.setBounds(21, 105, 109, 23);
@@ -129,16 +154,26 @@ public class ClientMainChat {
 		rdbtnAsymmetric.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent e) {
 				System.out.println("Ass");
-				setIsSymmetric(false);
+				setEcnciptionType(2);
 			}
 		});
 		rdbtnAsymmetric.setBounds(21, 162, 109, 23);
 		frame.getContentPane().add(rdbtnAsymmetric);
 
+		JRadioButton rdbtnNoEncryption = new JRadioButton("No encryption");
+		rdbtnNoEncryption.addActionListener(new ActionListener() {
+			public void actionPerformed(ActionEvent e) {
+				setEcnciptionType(1);			
+			}
+		});
+		rdbtnNoEncryption.setBounds(20, 217, 109, 23);
+		frame.getContentPane().add(rdbtnNoEncryption);
+		
 		ButtonGroup group = new ButtonGroup();
 		group.add(rdbtnSymmetric);
 		group.add(rdbtnAsymmetric);
-
+		group.add(rdbtnNoEncryption);
+	
 		JMenuBar menuBar = new JMenuBar();
 		frame.setJMenuBar(menuBar);
 
@@ -236,17 +271,61 @@ public class ClientMainChat {
 		JMenuItem mntmRegisterApublicKey = new JMenuItem("Register APublic Key");
 		mntmRegisterApublicKey.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent e) {
-
+				
 			}
 		});
 		mnKeys.add(mntmRegisterApublicKey);
+		
+		JMenu mnManageConnections = new JMenu("Manage Connections");
+		menuBar.add(mnManageConnections);
+		
+		JMenuItem mntmConnectToPki = new JMenuItem("Connect to PKI");
+		mntmConnectToPki.addActionListener(new ActionListener() {
+			public void actionPerformed(ActionEvent e) {
+				startPKIThread();
+				clPKI=new ClientPKIThread(pkiSocket, windowClient);
+				clPKI.start();
+				ouPKI.writeUTF(str);
+			}
+		});
+		mnManageConnections.add(mntmConnectToPki);
 
 	}
+	protected String cryptMessage(String message, Integer ecnciptionType) throws Exception {
+		
+		switch(ecnciptionType) {
+			case 0:{
+				return message;
+			}
+			case 1:{
+				return ae.encrypt(privKey, message).toString();			
+			}
+			case 2:{
+				return se.symetricEncription(getPublicKeySymmetric(), message);
+			}
+			default:{
+				return null;
+			}
+		}
+	}
+
 	private static void startThread(){
 		try{
 			s=new Socket("localhost",12345);
 			ou=new DataOutputStream(s.getOutputStream());
 			in=new BufferedReader(new InputStreamReader(System.in));
+			end=false;			
+		}catch(IOException io){
+			io.printStackTrace();
+		}
+	}
+	
+	private static void startPKIThread(){
+		try{
+			pkiSocket = new Socket("localhost",5000);
+			ouPKI=new DataOutputStream(pkiSocket.getOutputStream());
+			inPKI = new DataInputStream(pkiSocket.getInputStream());
+			//in=new BufferedReader(new InputStreamReader(System.in));
 			end=false;			
 		}catch(IOException io){
 			io.printStackTrace();
@@ -333,12 +412,12 @@ public class ClientMainChat {
 		ClientMainChat.cl = cl;
 	}
 
-	public static Boolean getIsSymmetric() {
-		return isSymmetric;
+	public static Integer getEcnciptionType() {
+		return ecnciptionType;
 	}
 
-	public static void setIsSymmetric(Boolean isSymmetric) {
-		ClientMainChat.isSymmetric = isSymmetric;
+	public static void setEcnciptionType(Integer ecnciptionType) {
+		ClientMainChat.ecnciptionType = ecnciptionType;
 	}
 
 	public static PublicKey getPubKey() {
@@ -415,5 +494,12 @@ public class ClientMainChat {
 		}
 		return name;
 	}
-
+	private class SwingAction extends AbstractAction {
+		public SwingAction() {
+			putValue(NAME, "SwingAction");
+			putValue(SHORT_DESCRIPTION, "Some short description");
+		}
+		public void actionPerformed(ActionEvent e) {
+		}
+	}
 }

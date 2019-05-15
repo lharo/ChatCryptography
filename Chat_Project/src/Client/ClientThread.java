@@ -1,11 +1,14 @@
 package Client;
 
-import java.awt.Window;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.net.Socket;
 
 import javax.swing.SwingUtilities;
+
+import com.google.gson.Gson;
+
+import Message.GsonMessage;
 
 public class ClientThread extends Thread{
 	private Socket s;
@@ -13,6 +16,7 @@ public class ClientThread extends Thread{
 	private boolean end;
 	private String message,name;
 	ClientMainChat fatherWindow;
+	private Gson gson = new Gson();
 	
 	public ClientThread(Socket s,String name, ClientMainChat window){
 		this.s=s;
@@ -29,15 +33,20 @@ public class ClientThread extends Thread{
 			end=false;
 			in=new DataInputStream(s.getInputStream());
 			while(!end){
-				message=in.readUTF();
-				System.out.println(message);
-				SwingUtilities.invokeLater(new Runnable() {
-				    public void run() {
-				    	fatherWindow.getChatField().setText( fatherWindow.getChatField().getText() + "\n" + message);
-				    }
-				  });
-				if(message.equalsIgnoreCase("- "+name+" disconected")){
-					end=true;					
+				String msg = in.readUTF();
+				System.out.println("Received message " + msg);
+				GsonMessage gMessage = gson.fromJson(msg, GsonMessage.class);
+				message = gMessage.getMessage();
+				System.out.println("Father " + message);
+				if(gMessage.getContentCode() == 1) {
+					SwingUtilities.invokeLater(new Runnable() {
+						public void run() {
+							fatherWindow.getChatField().setText( fatherWindow.getChatField().getText() + "\n" + message);
+						}
+					});
+					if(message.equalsIgnoreCase("- "+name+" disconected")){
+						end=true;					
+					}
 				}
 			}
 			s.close();
